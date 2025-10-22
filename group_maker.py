@@ -22,12 +22,6 @@ def get_world_bounds(objs):
     max_v = Vector((max(p.x for p in pts), max(p.y for p in pts), max(p.z for p in pts)))
     return min_v, max_v
 
-def keep_transform_parent(child: bpy.types.Object, parent: bpy.types.Object):
-    """Parent child to parent while keeping child's world transform."""
-    mw = child.matrix_world.copy()
-    child.parent = parent
-    child.matrix_parent_inverse = parent.matrix_world.inverted() @ mw
-    child.matrix_world = mw
 
 class OBJECT_OT_make_group_parent(bpy.types.Operator):
     bl_idname = "object.make_group_parent"
@@ -117,22 +111,19 @@ class OBJECT_OT_make_group_parent(bpy.types.Operator):
         # Avoid parenting the new group to itself if it somehow got selected
         to_parent = [o for o in sel if o != grp]
 
-        # Preserve selection state: deselect all, select children + group, set active group
-        prev_active = active
-        prev_selection = [o for o in context.selected_objects]
-
-        try:
-            # Do via data API to guarantee Keep Transform
-            for child in to_parent:
-                keep_transform_parent(child, grp)
-        except Exception as e:
-            # Fallback via operator
-            self.report({'WARNING'}, f"Data-API parenting failed ({e}), using operator fallback.")
-            bpy.ops.object.select_all(action='DESELECT')
-            for o in to_parent + [grp]:
-                o.select_set(True)
-            context.view_layer.objects.active = grp
-            bpy.ops.object.parent_set(type='OBJECT', keep_transform=True)
+        # Parent all selected objects to the new group using Blender's built-in command
+        # This is equivalent to "Set Parent To (Keep Transform)" from the UI
+        bpy.ops.object.select_all(action='DESELECT')
+        
+        # Select all objects to be parented
+        for child in to_parent:
+            child.select_set(True)
+        
+        # Set the group as active object (parent)
+        context.view_layer.objects.active = grp
+        
+        # Use Blender's built-in parent_set operator with keep_transform=True
+        bpy.ops.object.parent_set(type='OBJECT', keep_transform=True)
 
         # Final selection: select group only, set active to group
         bpy.ops.object.select_all(action='DESELECT')
