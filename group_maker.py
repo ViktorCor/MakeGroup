@@ -56,6 +56,12 @@ class OBJECT_OT_make_group_parent(bpy.types.Operator):
         default=True
     )
 
+    full_parenting: BoolProperty(
+        name="Full Parenting",
+        description="If ON, moves objects to group collection (like manual Set Parent To). If OFF, keeps objects in original collections with visual hierarchy only.",
+        default=True
+    )
+
     def execute(self, context):
         sel = [o for o in context.selected_objects]
         if not sel:
@@ -111,19 +117,51 @@ class OBJECT_OT_make_group_parent(bpy.types.Operator):
         # Avoid parenting the new group to itself if it somehow got selected
         to_parent = [o for o in sel if o != grp]
 
-        # Parent all selected objects to the new group using Blender's built-in command
-        # This is equivalent to "Set Parent To (Keep Transform)" from the UI
-        bpy.ops.object.select_all(action='DESELECT')
-        
-        # Select all objects to be parented
-        for child in to_parent:
-            child.select_set(True)
-        
-        # Set the group as active object (parent)
-        context.view_layer.objects.active = grp
-        
-        # Use Blender's built-in parent_set operator with keep_transform=True
-        bpy.ops.object.parent_set(type='OBJECT', keep_transform=True)
+        if self.full_parenting:
+            # Full parenting mode: move objects to common collection (like manual Set Parent To)
+            # Find the common collection where most objects are located
+            collection_counts = {}
+            for child in to_parent:
+                for collection in child.users_collection:
+                    collection_counts[collection] = collection_counts.get(collection, 0) + 1
+            
+            # Use the collection with most objects, or scene collection as fallback
+            target_collection = max(collection_counts.items(), key=lambda x: x[1])[0] if collection_counts else context.scene.collection
+            
+            # Move the group empty to the target collection (no extra collection needed)
+            for collection in grp.users_collection:
+                collection.objects.unlink(grp)
+            target_collection.objects.link(grp)
+            
+            # Move all objects to target collection and parent them
+            bpy.ops.object.select_all(action='DESELECT')
+            for child in to_parent:
+                # Remove from current collections
+                for collection in child.users_collection:
+                    collection.objects.unlink(child)
+                # Add to target collection
+                target_collection.objects.link(child)
+                # Select for parenting
+                child.select_set(True)
+            
+            # Set the group as active object (parent)
+            context.view_layer.objects.active = grp
+            
+            # Use Blender's built-in parent_set operator with keep_transform=True
+            bpy.ops.object.parent_set(type='OBJECT', keep_transform=True)
+        else:
+            # Visual hierarchy mode: keep objects in original collections, show visual hierarchy only
+            bpy.ops.object.select_all(action='DESELECT')
+            
+            # Select all objects to be parented
+            for child in to_parent:
+                child.select_set(True)
+            
+            # Set the group as active object (parent)
+            context.view_layer.objects.active = grp
+            
+            # Use Blender's built-in parent_set operator with keep_transform=True
+            bpy.ops.object.parent_set(type='OBJECT', keep_transform=True)
 
         # Final selection: select group only, set active to group
         bpy.ops.object.select_all(action='DESELECT')
@@ -148,11 +186,13 @@ class VIEW3D_PT_group_maker(bpy.types.Panel):
         col.prop(context.scene, "gm_pivot_mode", text="Pivot")
         col.prop(context.scene, "gm_align_rot")
         col.prop(context.scene, "gm_include_hidden")
+        col.prop(context.scene, "gm_full_parenting")
         op = col.operator("object.make_group_parent", text="Create Group")
         op.group_name = context.scene.gm_group_name
         op.pivot_mode = context.scene.gm_pivot_mode
         op.align_rotation_to_active = context.scene.gm_align_rot
         op.include_hidden = context.scene.gm_include_hidden
+        op.full_parenting = context.scene.gm_full_parenting
 
 def register_props():
     bpy.types.Scene.gm_group_name = StringProperty(
@@ -176,6 +216,11 @@ def register_props():
         name="Include Hidden",
         default=True
     )
+    bpy.types.Scene.gm_full_parenting = BoolProperty(
+        name="Full Parenting",
+        description="If ON, moves objects to group collection (like manual Set Parent To). If OFF, keeps objects in original collections with visual hierarchy only.",
+        default=True
+    )
 
 classes = (
     OBJECT_OT_make_group_parent,
@@ -195,6 +240,7 @@ def unregister():
     del bpy.types.Scene.gm_pivot_mode
     del bpy.types.Scene.gm_align_rot
     del bpy.types.Scene.gm_include_hidden
+    del bpy.types.Scene.gm_full_parenting
 
 if __name__ == "__main__":
     register()
